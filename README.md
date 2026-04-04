@@ -62,13 +62,15 @@ so students speak freely and admins respond effectively.
 
 ## Project Structure
 
-lib/
-├── main.dart
-└── screens/
-├── login_screen.dart
-├── register_screen.dart
-├── user_home_screen.dart
-└── admin_home_screen.dart
+## Project Structure
+
+- `lib/`
+  - `main.dart`
+  - `screens/`
+    - `login_screen.dart`
+    - `register_screen.dart`
+    - `user_home_screen.dart`
+    - `admin_home_screen.dart`
 
 ## Getting Started
 
