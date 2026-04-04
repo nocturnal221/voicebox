@@ -64,11 +64,11 @@ so students speak freely and admins respond effectively.
 
 lib/
 ├── main.dart
-├── screens/
-│ ├── login_screen.dart
-│ ├── register_screen.dart
-│ ├── user_home_screen.dart
-│ └── admin_home_screen.dart
+└── screens/
+├── login_screen.dart
+├── register_screen.dart
+├── user_home_screen.dart
+└── admin_home_screen.dart
 
 ## Getting Started
 
