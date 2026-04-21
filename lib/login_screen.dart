@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'register_screen.dart';
-import 'user_home_screen.dart';
-import 'admin_home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -30,8 +28,6 @@ class _LoginScreenState extends State<LoginScreen> {
     final password = passwordController.text;
 
     if (email.isEmpty || password.isEmpty) {
-
-      
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter email and password'),
@@ -49,34 +45,61 @@ class _LoginScreenState extends State<LoginScreen> {
         password: password,
       );
 
-      final role = response.user?.userMetadata?['role'];
+      if (response.user == null) {
+        throw Exception('Login failed. Please try again.');
+      }
 
-      if (mounted) {
-        if (isAdmin && role == 'admin') {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const AdminHomeScreen()),
-          );
-        } else if (!isAdmin && role == 'user') {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const UserHomeScreen()),
-          );
-        } else {
-          await Supabase.instance.client.auth.signOut();
+      final profile = await Supabase.instance.client
+          .from('profiles')
+          .select('role, assigned_category')
+          .eq('id', response.user!.id)
+          .single();
+
+      final role = profile['role'] as String? ?? 'user';
+      final assignedCategory = profile['assigned_category']?.toString();
+      final bool isActuallyAdmin = role == 'main_admin' || role == 'sub_admin';
+
+      if (isAdmin && !isActuallyAdmin) {
+        await Supabase.instance.client.auth.signOut();
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                isAdmin
-                    ? 'Access denied. This account is not an admin.'
-                    : 'Access denied. This account is not a general user.',
-              ),
+            const SnackBar(
+              content: Text('Access denied. This account is not an admin.'),
               backgroundColor: Colors.red,
             ),
           );
         }
+        return;
+      }
+
+      if (!isAdmin && isActuallyAdmin) {
+        await Supabase.instance.client.auth.signOut();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Access denied. Please use the admin toggle.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      if (role == 'sub_admin' &&
+          (assignedCategory == null || assignedCategory.isEmpty)) {
+        await Supabase.instance.client.auth.signOut();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('This admin account has no assigned category yet.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
       }
     } catch (e) {
+      await Supabase.instance.client.auth.signOut();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -103,7 +126,7 @@ class _LoginScreenState extends State<LoginScreen> {
             children: [
               const SizedBox(height: 40),
               Icon(
-                Icons.record_voice_over_rounded,
+                Icons.chat_bubble_outline_rounded,
                 size: 48,
                 color: theme.colorScheme.primary,
               ),
@@ -114,13 +137,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                'Sign in to continue to VoiceBox',
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
+              // const SizedBox(height: 8),
+              // Text(
+              //   'Login as a general user, DSW, or category admin.',
+              //   style: theme.textTheme.bodyLarge?.copyWith(
+              //     color: theme.colorScheme.onSurfaceVariant,
+              //   ),
+              // ),
               const SizedBox(height: 40),
               TextField(
                 controller: emailController,
@@ -154,8 +177,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: SwitchListTile(
-                  title: const Text('Login'),
-                  subtitle: Text(isAdmin ? 'As Admin' : 'As General user'),
+                  title: const Text('Login As'),
+                  subtitle: Text(isAdmin ? 'Admin' : 'General User'),
                   value: isAdmin,
                   onChanged: (value) => setState(() => isAdmin = value),
                   secondary: Icon(
@@ -164,6 +187,21 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
               ),
+              //const SizedBox(height: 12),
+              // Container(
+              //   width: double.infinity,
+              //   padding: const EdgeInsets.all(12),
+              //   decoration: BoxDecoration(
+              //     color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
+              //     borderRadius: BorderRadius.circular(12),
+              //   ),
+              //   child: Text(
+              //     isAdmin
+              //         ? 'DSW can see all problems. Category admins can only see and respond to their own assigned category.'
+              //         : 'General users can create complaints and track their own submissions.',
+              //     style: theme.textTheme.bodyMedium,
+              //   ),
+              // ),
               const SizedBox(height: 32),
               SizedBox(
                 width: double.infinity,
@@ -182,7 +220,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       : const Text(
                           'Login',
                           style: TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w600),
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                 ),
               ),

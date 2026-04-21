@@ -10,13 +10,24 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  bool isAdmin = false;
   bool _isLoading = false;
+  bool _isAdmin = false;
+  String? _selectedAdminCategory;
 
   final nameController = TextEditingController();
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
   final confirmPasswordController = TextEditingController();
+
+  final List<String> _adminCategories = [
+    'DSW',
+    'Academic',
+    'Hostel',
+    'Canteen',
+    'Management',
+    'Infrastructure',
+    'Other',
+  ];
 
   @override
   void dispose() {
@@ -33,7 +44,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final password = passwordController.text;
     final confirmPassword = confirmPasswordController.text;
 
-    if (name.isEmpty || email.isEmpty || password.isEmpty || confirmPassword.isEmpty) {
+    if (name.isEmpty ||
+        email.isEmpty ||
+        password.isEmpty ||
+        confirmPassword.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please fill all fields'),
@@ -63,15 +77,30 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
+    if (_isAdmin && _selectedAdminCategory == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select an admin category'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
+      final bool isDsw = _selectedAdminCategory == 'DSW';
+
       await Supabase.instance.client.auth.signUp(
         email: email,
         password: password,
         data: {
           'full_name': name,
-          'role': isAdmin ? 'admin' : 'user',
+          'role': _isAdmin ? (isDsw ? 'main_admin' : 'sub_admin') : 'user',
+          'assigned_category': _isAdmin && !isDsw
+              ? _selectedAdminCategory
+              : null,
         },
       );
 
@@ -82,7 +111,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
           builder: (ctx) => AlertDialog(
             title: const Text('Verify Your Email'),
             content: const Text(
-              'A confirmation link has been sent to your email. Please check your inbox and click the link before logging in.',
+              'A confirmation link has been sent to your email. '
+              'Please check your inbox and click the link before logging in.',
             ),
             actions: [
               FilledButton(
@@ -139,6 +169,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
               ),
               const SizedBox(height: 32),
+
               TextField(
                 controller: nameController,
                 decoration: InputDecoration(
@@ -152,6 +183,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 textCapitalization: TextCapitalization.words,
               ),
               const SizedBox(height: 20),
+
               TextField(
                 controller: emailController,
                 decoration: InputDecoration(
@@ -165,6 +197,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 keyboardType: TextInputType.emailAddress,
               ),
               const SizedBox(height: 20),
+
               TextField(
                 controller: passwordController,
                 obscureText: true,
@@ -178,6 +211,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
               ),
               const SizedBox(height: 20),
+
               TextField(
                 controller: confirmPasswordController,
                 obscureText: true,
@@ -191,24 +225,63 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
               ),
               const SizedBox(height: 20),
+
               Container(
                 decoration: BoxDecoration(
                   border: Border.all(color: theme.colorScheme.outline),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: SwitchListTile(
-                  title: Text(
-                    isAdmin ? 'Admin account' : 'General user account',
-                  ),
-                  value: isAdmin,
-                  onChanged: (value) => setState(() => isAdmin = value),
+                  title: const Text('Register as'),
+                  subtitle: Text(_isAdmin ? 'Admin' : 'General User'),
+                  value: _isAdmin,
+                  onChanged: (value) {
+                    setState(() {
+                      _isAdmin = value;
+                      if (!_isAdmin) {
+                        _selectedAdminCategory = null;
+                      }
+                    });
+                  },
                   secondary: Icon(
-                    isAdmin ? Icons.admin_panel_settings : Icons.person_outline,
-                    color: isAdmin ? theme.colorScheme.primary : null,
+                    _isAdmin
+                        ? Icons.admin_panel_settings_outlined
+                        : Icons.person_outline,
+                    color: _isAdmin ? theme.colorScheme.primary : null,
                   ),
                 ),
               ),
+
+              if (_isAdmin) ...[
+                const SizedBox(height: 20),
+                DropdownButtonFormField<String>(
+                  value: _selectedAdminCategory,
+                  decoration: InputDecoration(
+                    labelText: 'Admin Category *',
+                    hintText: 'Select admin category',
+                    prefixIcon: const Icon(Icons.category_outlined),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  items: _adminCategories
+                      .map(
+                        (category) => DropdownMenuItem(
+                          value: category,
+                          child: Text(category),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedAdminCategory = value;
+                    });
+                  },
+                ),
+              ],
+
               const SizedBox(height: 32),
+
               SizedBox(
                 width: double.infinity,
                 height: 56,
@@ -216,39 +289,32 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   onPressed: _isLoading ? null : _register,
                   child: _isLoading
                       ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Text(
                           'Register',
                           style: TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w600),
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                 ),
               ),
-              const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'Already have an account? ',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.pushReplacement(
+
+              const SizedBox(height: 20),
+
+              Center(
+                child: TextButton(
+                  onPressed: () {
+                    Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(builder: (_) => const LoginScreen()),
-                    ),
-                    child: const Text(
-                      'Login',
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ],
+                    );
+                  },
+                  child: const Text('Already have an account? Login'),
+                ),
               ),
             ],
           ),

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'login_screen.dart';
+import 'main.dart'; // for AuthGate
 
 class SplashScreen extends StatelessWidget {
   const SplashScreen({super.key});
@@ -65,7 +65,7 @@ class SplashScreen extends StatelessWidget {
                     onPressed: () {
                       Navigator.pushReplacement(
                         context,
-                        MaterialPageRoute(builder: (_) => const LoginScreen()),
+                        MaterialPageRoute(builder: (_) => const AuthGate()),
                       );
                     },
                     style: FilledButton.styleFrom(

@@ -1,32 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'admin_analytics_screen.dart';
 import 'admin_submission_detail_screen.dart';
 import 'app_settings.dart';
 import 'app_widgets.dart';
 
-class AdminHomeScreen extends StatefulWidget {
-  const AdminHomeScreen({super.key});
+class SubAdminHomeScreen extends StatefulWidget {
+  const SubAdminHomeScreen({super.key});
 
   @override
-  State<AdminHomeScreen> createState() => _AdminHomeScreenState();
+  State<SubAdminHomeScreen> createState() => _SubAdminHomeScreenState();
 }
 
-class _AdminHomeScreenState extends State<AdminHomeScreen> {
-  String selectedTypeFilter = 'All';
-  String selectedStatusFilter = 'All';
-  String selectedSort = 'Newest';
-  final searchController = TextEditingController();
+class _SubAdminHomeScreenState extends State<SubAdminHomeScreen> {
+  List<Map<String, dynamic>> _submissions = [];
+  String _assignedCategory = '';
+  String _selectedStatusFilter = 'All';
+  String _selectedSort = 'Newest';
+  bool _isLoading = true;
+  final TextEditingController _searchController = TextEditingController();
 
-  final typeFilters = ['All', 'Complaint', 'Suggestion', 'Feedback'];
   final statusFilters = ['All', 'Pending', 'In Progress', 'Solved'];
   final sortOptions = ['Newest', 'Oldest', 'Priority', 'Needs Attention'];
-
-  List<Map<String, dynamic>> submissions = [];
-  List<Map<String, dynamic>> subAdmins = [];
-  bool _isLoading = true;
-  String _adminRole = 'main_admin';
 
   @override
   void initState() {
@@ -36,38 +31,61 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
   @override
   void dispose() {
-    searchController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
   Future<void> _loadData() async {
-    await Future.wait([_fetchSubmissions(), _fetchSubAdmins(), _fetchMyRole()]);
+    await _fetchMyCategory();
+    await _fetchSubmissions();
   }
 
-  Future<void> _fetchMyRole() async {
+  Future<void> _fetchMyCategory() async {
     try {
       final userId = Supabase.instance.client.auth.currentUser?.id;
       if (userId == null) return;
+
       final res = await Supabase.instance.client
           .from('profiles')
-          .select('role')
+          .select('assigned_category')
           .eq('id', userId)
           .single();
-      if (mounted) setState(() => _adminRole = res['role'] ?? 'main_admin');
-    } catch (_) {}
+
+      if (mounted) {
+        setState(() {
+          _assignedCategory = res['assigned_category'] ?? '';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error fetching profile: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _fetchSubmissions() async {
+    if (_assignedCategory.isEmpty) {
+      if (mounted) setState(() => _isLoading = false);
+      return;
+    }
+
     setState(() => _isLoading = true);
+
     try {
       final data = await Supabase.instance.client
           .from('submissions')
           .select()
+          .eq('category', _assignedCategory)
           .order('created_at', ascending: false);
 
       if (mounted) {
         setState(() {
-          submissions = List<Map<String, dynamic>>.from(data);
+          _submissions = List<Map<String, dynamic>>.from(data);
         });
       }
     } catch (e) {
@@ -82,20 +100,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
-  }
-
-  Future<void> _fetchSubAdmins() async {
-    try {
-      final data = await Supabase.instance.client
-          .from('profiles')
-          .select('id, assigned_category')
-          .eq('role', 'sub_admin');
-      if (mounted) {
-        setState(() {
-          subAdmins = List<Map<String, dynamic>>.from(data);
-        });
-      }
-    } catch (_) {}
   }
 
   Future<void> _logout() async {
@@ -120,6 +124,16 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       await Supabase.instance.client.auth.signOut();
     }
   }
+
+  int get _totalCount => _submissions.length;
+  int get _pendingCount =>
+      _submissions.where((s) => s['status'] == 'pending').length;
+  int get _inProgressCount =>
+      _submissions.where((s) => s['status'] == 'in_progress').length;
+  int get _solvedCount =>
+      _submissions.where((s) => s['status'] == 'solved').length;
+  int get _unsatisfiedCount =>
+      _submissions.where((s) => s['satisfaction'] == 'not_satisfied').length;
 
   Color _statusColor(String? status) {
     switch (status) {
@@ -154,17 +168,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     }
   }
 
-  String _priorityLabel(String? priority) {
-    switch ((priority ?? 'medium').toLowerCase()) {
-      case 'high':
-        return 'High';
-      case 'low':
-        return 'Low';
-      default:
-        return 'Medium';
-    }
-  }
-
   DateTime _dueDate(Map<String, dynamic> item) {
     final dueAt = DateTime.tryParse(item['due_at']?.toString() ?? '');
     if (dueAt != null) return dueAt.toLocal();
@@ -172,8 +175,19 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     return (createdAt ?? DateTime.now()).toLocal().add(const Duration(days: 3));
   }
 
+  String _timeAgo(String? createdAt) {
+    if (createdAt == null) return '';
+    final dt = DateTime.tryParse(createdAt)?.toLocal();
+    if (dt == null) return '';
+    final diff = DateTime.now().difference(dt);
+    if (diff.inDays > 0) return '${diff.inDays}d ago';
+    if (diff.inHours > 0) return '${diff.inHours}h ago';
+    if (diff.inMinutes > 0) return '${diff.inMinutes}m ago';
+    return 'Just now';
+  }
+
   bool _matchesSearch(Map<String, dynamic> item) {
-    final query = searchController.text.trim().toLowerCase();
+    final query = _searchController.text.trim().toLowerCase();
     if (query.isEmpty) return true;
     final text = [
       item['title'],
@@ -186,27 +200,23 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     return text.contains(query);
   }
 
-  List<Map<String, dynamic>> get filteredSubmissions {
-    final items = submissions.where((s) {
-      final typeMatch =
-          selectedTypeFilter == 'All' ||
-          s['submission_type'] == selectedTypeFilter;
-      final statusMatch =
-          selectedStatusFilter == 'All' ||
-          s['status']?.toString().toLowerCase() ==
-              selectedStatusFilter.toLowerCase().replaceAll(' ', '_');
-      return typeMatch && statusMatch && _matchesSearch(s);
+  List<Map<String, dynamic>> get _filteredSubmissions {
+    final items = _submissions.where((s) {
+      final statusMatch = _selectedStatusFilter == 'All' ||
+          s['status'] ==
+              _selectedStatusFilter.toLowerCase().replaceAll(' ', '_');
+      return statusMatch && _matchesSearch(s);
     }).toList();
 
     items.sort((a, b) {
-      switch (selectedSort) {
+      switch (_selectedSort) {
         case 'Oldest':
           return (DateTime.tryParse(a['created_at']?.toString() ?? '') ??
                   DateTime.now())
               .compareTo(
-                DateTime.tryParse(b['created_at']?.toString() ?? '') ??
-                    DateTime.now(),
-              );
+            DateTime.tryParse(b['created_at']?.toString() ?? '') ??
+                DateTime.now(),
+          );
         case 'Priority':
           int rank(String? p) {
             switch ((p ?? 'medium').toLowerCase()) {
@@ -219,9 +229,8 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
             }
           }
 
-          return rank(
-            a['priority']?.toString(),
-          ).compareTo(rank(b['priority']?.toString()));
+          return rank(a['priority']?.toString())
+              .compareTo(rank(b['priority']?.toString()));
         case 'Needs Attention':
           int attention(Map<String, dynamic> item) {
             if (item['reopen_requested'] == true) return 0;
@@ -236,46 +245,32 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           return (DateTime.tryParse(b['created_at']?.toString() ?? '') ??
                   DateTime.now())
               .compareTo(
-                DateTime.tryParse(a['created_at']?.toString() ?? '') ??
-                    DateTime.now(),
-              );
+            DateTime.tryParse(a['created_at']?.toString() ?? '') ??
+                DateTime.now(),
+          );
       }
     });
 
     return items;
   }
 
-  String _timeAgo(String? createdAt) {
-    if (createdAt == null) return '';
-    final dt = DateTime.tryParse(createdAt)?.toLocal();
-    if (dt == null) return '';
-    final diff = DateTime.now().difference(dt);
-    if (diff.inDays > 0) return '${diff.inDays}d ago';
-    if (diff.inHours > 0) return '${diff.inHours}h ago';
-    if (diff.inMinutes > 0) return '${diff.inMinutes}m ago';
-    return 'Just now';
-  }
-
   Future<void> _copyCsv() async {
     final buffer = StringBuffer();
     buffer.writeln(
-      'title,status,category,type,priority,assigned_to,reopen_requested,created_at',
+      'title,status,category,type,priority,reopen_requested,created_at',
     );
-    for (final item in filteredSubmissions) {
+    for (final item in _filteredSubmissions) {
       String cell(dynamic value) =>
           '"${(value ?? '').toString().replaceAll('"', '""')}"';
-      buffer.writeln(
-        [
-          cell(item['title']),
-          cell(item['status']),
-          cell(item['category']),
-          cell(item['submission_type']),
-          cell(item['priority']),
-          cell(item['assigned_to']),
-          cell(item['reopen_requested']),
-          cell(item['created_at']),
-        ].join(','),
-      );
+      buffer.writeln([
+        cell(item['title']),
+        cell(item['status']),
+        cell(item['category']),
+        cell(item['submission_type']),
+        cell(item['priority']),
+        cell(item['reopen_requested']),
+        cell(item['created_at']),
+      ].join(','));
     }
 
     await Clipboard.setData(ClipboardData(text: buffer.toString()));
@@ -289,46 +284,22 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final totalSolved = submissions
-        .where((s) => s['status'] == 'solved')
-        .length;
-    final totalPending = submissions
-        .where((s) => s['status'] == 'pending')
-        .length;
-    final totalInProgress = submissions
-        .where((s) => s['status'] == 'in_progress')
-        .length;
-    final unsatisfied = submissions
-        .where((s) => s['satisfaction'] == 'not_satisfied')
-        .length;
-    final overdue = submissions.where((s) {
+    final overdue = _submissions.where((s) {
       final status = s['status']?.toString() ?? 'pending';
       return status != 'solved' && DateTime.now().isAfter(_dueDate(s));
     }).length;
-    final reopenRequested = submissions
-        .where((s) => s['reopen_requested'] == true)
-        .length;
-    final isMainAdmin = _adminRole == 'main_admin';
+    final reopenRequested =
+        _submissions.where((s) => s['reopen_requested'] == true).length;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(isMainAdmin ? 'DSW Dashboard' : 'Category Admin Dashboard'),
+        title: Text(
+          _assignedCategory.isEmpty
+              ? 'Category Admin Dashboard'
+              : '$_assignedCategory Admin',
+        ),
         automaticallyImplyLeading: false,
         actions: [
-          if (isMainAdmin)
-            IconButton(
-              icon: const Icon(Icons.analytics_outlined),
-              tooltip: 'Analytics',
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        AdminAnalyticsScreen(submissions: submissions),
-                  ),
-                );
-              },
-            ),
           IconButton(
             icon: const Icon(Icons.copy_all_rounded),
             tooltip: 'Copy CSV',
@@ -363,33 +334,29 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          isMainAdmin
-                              ? 'Manage all submissions'
-                              : 'Manage assigned submissions',
+                          _assignedCategory.isEmpty
+                              ? 'No assigned category yet'
+                              : 'Manage $_assignedCategory items',
                           style: theme.textTheme.headlineSmall?.copyWith(
                             color: Colors.white,
                             fontWeight: FontWeight.w900,
                           ),
                         ),
-                        // const SizedBox(height: 10),
-                        // Text(
-                        //   'Search faster, sort by urgency, review reopen requests, track SLA risk, and export quick reports.',
-                        //   style: theme.textTheme.bodyLarge?.copyWith(
-                        //     color: Colors.white.withValues(alpha: 0.9),
-                        //     height: 1.4,
-                        //   ),
-                        // ),
-                        const SizedBox(height: 18),
+                        const SizedBox(height: 10),
+                        Text(
+                          _assignedCategory.isEmpty
+                              ? 'Ask the main admin to assign you a category so you can start reviewing submissions.'
+                              : 'Search the queue, sort by urgency, respond in chat, and keep users updated with clear progress notes.',
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            color: Colors.white.withValues(alpha: 0.9),
+                            height: 1.45,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
                         Wrap(
                           spacing: 10,
                           runSpacing: 10,
                           children: [
-                            AppTagChip(
-                              label: '${submissions.length} total',
-                              icon: Icons.inbox_outlined,
-                              color: Colors.white.withValues(alpha: 0.14),
-                              foregroundColor: Colors.white,
-                            ),
                             AppTagChip(
                               label: '$reopenRequested reopen requested',
                               icon: Icons.replay_circle_filled_outlined,
@@ -415,35 +382,35 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                       children: [
                         AppStatCard(
                           title: 'Total',
-                          value: '${submissions.length}',
+                          value: '$_totalCount',
                           icon: Icons.inbox_rounded,
                           color: Colors.deepPurple,
                         ),
                         const SizedBox(width: 12),
                         AppStatCard(
                           title: 'Pending',
-                          value: '$totalPending',
+                          value: '$_pendingCount',
                           icon: Icons.pending_actions_rounded,
                           color: Colors.red,
                         ),
                         const SizedBox(width: 12),
                         AppStatCard(
                           title: 'In Progress',
-                          value: '$totalInProgress',
+                          value: '$_inProgressCount',
                           icon: Icons.timelapse_rounded,
                           color: Colors.orange,
                         ),
                         const SizedBox(width: 12),
                         AppStatCard(
                           title: 'Solved',
-                          value: '$totalSolved',
+                          value: '$_solvedCount',
                           icon: Icons.task_alt_rounded,
                           color: Colors.green,
                         ),
                         const SizedBox(width: 12),
                         AppStatCard(
                           title: 'Unsatisfied',
-                          value: '$unsatisfied',
+                          value: '$_unsatisfiedCount',
                           icon: Icons.sentiment_dissatisfied_rounded,
                           color: Colors.pink,
                         ),
@@ -456,60 +423,42 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const AppSectionTitle(
-                          title: 'Search, filter, and sort',
-                          subtitle:
-                              'Narrow the queue by keyword, type, status, or urgency.',
+                          title: 'Search and sort',
+                          subtitle: 'Filter your category queue by status and urgency.',
                           icon: Icons.filter_alt_outlined,
                         ),
                         const SizedBox(height: 16),
                         AppSearchField(
-                          controller: searchController,
-                          hintText:
-                              'Search by title, description, category, status, or priority',
+                          controller: _searchController,
+                          hintText: 'Search by title, description, category, status, or priority',
                           onChanged: (_) => setState(() {}),
                         ),
                         const SizedBox(height: 16),
                         Wrap(
                           spacing: 8,
                           runSpacing: 8,
-                          children: typeFilters.map((f) {
+                          children: statusFilters.map((filter) {
                             return ChoiceChip(
-                              label: Text(f),
-                              selected: selectedTypeFilter == f,
+                              label: Text(filter),
+                              selected: _selectedStatusFilter == filter,
                               onSelected: (_) =>
-                                  setState(() => selectedTypeFilter = f),
-                            );
-                          }).toList(),
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: statusFilters.map((f) {
-                            return ChoiceChip(
-                              label: Text(f),
-                              selected: selectedStatusFilter == f,
-                              onSelected: (_) =>
-                                  setState(() => selectedStatusFilter = f),
+                                  setState(() => _selectedStatusFilter = filter),
                             );
                           }).toList(),
                         ),
                         const SizedBox(height: 16),
                         DropdownButtonFormField<String>(
-                          value: selectedSort,
+                          value: _selectedSort,
                           decoration: const InputDecoration(
                             labelText: 'Sort by',
                             prefixIcon: Icon(Icons.sort_rounded),
                           ),
                           items: sortOptions
-                              .map(
-                                (s) =>
-                                    DropdownMenuItem(value: s, child: Text(s)),
-                              )
+                              .map((s) => DropdownMenuItem(value: s, child: Text(s)))
                               .toList(),
                           onChanged: (value) {
                             if (value != null) {
-                              setState(() => selectedSort = value);
+                              setState(() => _selectedSort = value);
                             }
                           },
                         ),
@@ -517,24 +466,31 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                     ),
                   ),
                   const SizedBox(height: 18),
-                  if (filteredSubmissions.isEmpty)
+                  if (_assignedCategory.isEmpty)
+                    const SizedBox(
+                      height: 320,
+                      child: AppEmptyState(
+                        title: 'No assigned category',
+                        subtitle: 'You do not have an assigned category yet. Contact the main admin.',
+                        icon: Icons.folder_off_outlined,
+                      ),
+                    )
+                  else if (_filteredSubmissions.isEmpty)
                     const SizedBox(
                       height: 320,
                       child: AppEmptyState(
                         title: 'No submissions found',
-                        subtitle:
-                            'Try clearing the search or changing the filters.',
+                        subtitle: 'There are no items for the selected search or filters.',
                         icon: Icons.search_off_rounded,
                       ),
                     )
                   else
-                    ...filteredSubmissions.map((item) {
+                    ..._filteredSubmissions.map((item) {
                       final status = item['status'] ?? 'pending';
                       final statusColor = _statusColor(status);
                       final hasUnsatisfied =
                           item['satisfaction'] == 'not_satisfied';
-                      final isOverdue =
-                          status != 'solved' &&
+                      final isOverdue = status != 'solved' &&
                           DateTime.now().isAfter(_dueDate(item));
 
                       return Padding(
@@ -549,8 +505,8 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                                 MaterialPageRoute(
                                   builder: (_) => AdminSubmissionDetailScreen(
                                     submission: item,
-                                    subAdmins: subAdmins,
-                                    isMainAdmin: isMainAdmin,
+                                    subAdmins: const [],
+                                    isMainAdmin: false,
                                   ),
                                 ),
                               );
@@ -592,23 +548,16 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                                   spacing: 8,
                                   runSpacing: 8,
                                   children: [
+                                    AppTagChip(label: item['submission_type'] ?? ''),
                                     AppTagChip(
-                                      label: item['submission_type'] ?? '',
-                                    ),
-                                    AppTagChip(label: item['category'] ?? ''),
-                                    AppTagChip(
-                                      label:
-                                          '${_priorityLabel(item['priority'])} Priority',
+                                      label: '${(item['priority'] ?? 'medium').toString().toUpperCase()} priority',
                                       color: _priorityColor(item['priority']),
-                                      foregroundColor: _priorityColor(
-                                        item['priority'],
-                                      ),
+                                      foregroundColor: _priorityColor(item['priority']),
                                       outlined: true,
                                       icon: Icons.flag_outlined,
                                     ),
                                     AppTagChip(
-                                      label:
-                                          'Created ${_timeAgo(item['created_at'])}',
+                                      label: 'Created ${_timeAgo(item['created_at'])}',
                                       icon: Icons.schedule_outlined,
                                     ),
                                     if (hasUnsatisfied)
@@ -617,8 +566,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                                         color: Colors.pink,
                                         foregroundColor: Colors.pink,
                                         outlined: true,
-                                        icon: Icons
-                                            .sentiment_dissatisfied_rounded,
+                                        icon: Icons.sentiment_dissatisfied_rounded,
                                       ),
                                     if (item['reopen_requested'] == true)
                                       const AppTagChip(
@@ -626,8 +574,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                                         color: Colors.orange,
                                         foregroundColor: Colors.orange,
                                         outlined: true,
-                                        icon:
-                                            Icons.replay_circle_filled_outlined,
+                                        icon: Icons.replay_circle_filled_outlined,
                                       ),
                                     if (isOverdue)
                                       const AppTagChip(
