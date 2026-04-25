@@ -257,6 +257,7 @@ Built as a course project at **RUET (Rajshahi University of Engineering & Techno
 | | |
 |---|---|
 | **GitHub** | [@nocturnal221](https://github.com/nocturnal221) |
+| **GitHub** | [@Prithi-iiBiswas](https://github.com/Prithi-iiBiswas) |
 
 ---
 
